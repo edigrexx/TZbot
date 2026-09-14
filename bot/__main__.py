@@ -9,10 +9,11 @@ from urllib.parse import urlsplit
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
 
 from .config import Config, ConfigError, load_config
 from .extractor import OpenRouterExtractor
-from .handlers import router
+from .handlers import TIME_COMMAND_DESCRIPTION, router
 
 log = logging.getLogger("bot")
 
@@ -36,6 +37,14 @@ async def run(config: Config) -> None:
                 urlsplit(webhook.url).netloc, webhook.pending_update_count,
             )
             await bot.delete_webhook(drop_pending_updates=True)
+
+        # Меню «/» в личке и группах; без него команду приходится помнить наизусть.
+        commands = [
+            BotCommand(command="time", description=TIME_COMMAND_DESCRIPTION),
+            BotCommand(command="help", description="Как пользоваться"),
+        ]
+        await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+        await bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
 
         me = await bot.get_me()
         log.info(
