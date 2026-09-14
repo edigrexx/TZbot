@@ -67,14 +67,29 @@ def _ref(message: Message, config: Config) -> datetime:
 
 def _reply_candidate(message: Message, config: Config, me: User) -> Optional[Candidate]:
     source = message.reply_to_message
-    if source is None or (source.from_user and source.from_user.id == me.id):
+    if source is not None and source.from_user and source.from_user.id == me.id:
         return None
-    # Если пользователь процитировал фрагмент — разбираем только его.
-    text = message.quote.text if message.quote else _text(source)
+    # Цитата — часть самого сообщения с командой, поэтому доступна даже без reply_to_message.
+    if message.quote and message.quote.text.strip():
+        return Candidate(message.quote.text, _ref(source or message, config))
+    if source is None:
+        return None
+    text = _text(source)
     # В темах форума reply_to_message указывает на служебное сообщение о создании темы — у него нет текста.
     if not text.strip():
         return None
     return Candidate(text, _ref(source, config))
+
+
+def _log_command(message: Message, command: CommandObject) -> None:
+    # Только структура, без текстов: помогает понять, что Telegram передал боту.
+    source = message.reply_to_message
+    log.info(
+        "команда /%s chat=%s type=%s args=%s reply=%s reply_type=%s reply_text=%s quote=%s external_reply=%s",
+        command.command, message.chat.id, message.chat.type, bool(command.args),
+        source is not None, source.content_type if source else None,
+        bool(source and _text(source).strip()), message.quote is not None, message.external_reply is not None,
+    )
 
 
 async def _answer(message: Message, candidates: list[Candidate], config: Config, extract: ExtractFn, me: User) -> None:
@@ -105,12 +120,21 @@ async def on_help(message: Message, me: User) -> None:
 
 @router.message(Command("time", "tz"))
 async def on_command(message: Message, command: CommandObject, config: Config, extract: ExtractFn, me: User) -> None:
+    _log_command(message, command)
     candidates = []
     if command.args:
         candidates.append(Candidate(command.args, _ref(message, config)))
     reply = _reply_candidate(message, config, me)
     if reply:
         candidates.append(reply)
+
+    if not candidates and (message.reply_to_message is not None or message.external_reply is not None):
+        await message.reply(
+            "Не вижу текста сообщения, на которое вы ответили — Telegram его не передал.\n"
+            "Выделите фрагмент со временем и ответьте на него цитатой с <code>/time</code>, "
+            "или напишите время прямо в команде: <code>/time завтра в 11 по алматы</code>."
+        )
+        return
     await _answer(message, candidates, config, extract, me)
 
 
