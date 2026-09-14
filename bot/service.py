@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional, Sequence
 
 from .config import Zone
@@ -24,8 +24,15 @@ class Result:
     reply: Optional[str] = None  # HTML
 
 
-async def resolve(text: str, ref: datetime, zones: Sequence[Zone], extract: ExtractFn) -> Result:
+async def resolve(
+    text: str,
+    ref: datetime,
+    zones: Sequence[Zone],
+    extract: ExtractFn,
+    now: Optional[datetime] = None,
+) -> Result:
     """Бросает UserFacingError, если модель недоступна или ответила некорректно."""
+    now = now or datetime.now(timezone.utc)
     raw = await extract(text, ref)
     try:
         extraction = parse_model_output(raw, ref)
@@ -37,9 +44,10 @@ async def resolve(text: str, ref: datetime, zones: Sequence[Zone], extract: Extr
         log.info("разбор text=%r ref=%s model=%r результат=не найдено", text, ref.isoformat(), raw)
         return Result(found=False)
 
-    assert extraction.moment is not None
     log.info(
-        "разбор text=%r ref=%s model=%r результат=%s approximate=%s",
-        text, ref.isoformat(), raw, extraction.moment.isoformat(), extraction.approximate,
+        "разбор text=%r ref=%s model=%r встречи=%s ошибки=%s пропущено=%s",
+        text, ref.isoformat(), raw,
+        [(m.title, m.moment.isoformat(), m.approximate) for m in extraction.meetings],
+        list(extraction.errors), extraction.skipped,
     )
-    return Result(found=True, reply=format_reply(extraction, zones, ref))
+    return Result(found=True, reply=format_reply(extraction, zones, now))

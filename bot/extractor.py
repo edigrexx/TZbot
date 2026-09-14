@@ -19,15 +19,15 @@ log = logging.getLogger(__name__)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 API_TIMEOUT_SECONDS = 10.0
-# Потолок, а не расход: сам JSON ~50 токенов, но у «думающих» моделей рассуждения входят в тот же лимит.
-MAX_TOKENS = 1000
+# Потолок, а не расход: одна встреча в JSON ~80 токенов, но у «думающих» моделей рассуждения входят в тот же лимит.
+MAX_TOKENS = 2000
 MAX_MODELS = 3  # OpenRouter принимает основную модель и до двух запасных
 
 # Все поля обязательны, ненужные — null: так схема проходит strict-режим и у OpenAI, и у Gemini.
-OUTPUT_SCHEMA = {
+MEETING_SCHEMA = {
     "type": "object",
     "properties": {
-        "found": {"type": "boolean"},
+        "title": {"type": ["string", "null"], "description": "Short meeting name from the text"},
         "date": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
         "time": {"type": ["string", "null"], "description": "HH:MM, 24h"},
         "offset_minutes": {"type": ["integer", "null"]},
@@ -35,7 +35,13 @@ OUTPUT_SCHEMA = {
         "tz_explicit": {"type": ["boolean", "null"]},
         "approximate": {"type": ["boolean", "null"]},
     },
-    "required": ["found", "date", "time", "offset_minutes", "tz", "tz_explicit", "approximate"],
+    "required": ["title", "date", "time", "offset_minutes", "tz", "tz_explicit", "approximate"],
+    "additionalProperties": False,
+}
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"meetings": {"type": "array", "items": MEETING_SCHEMA}},
+    "required": ["meetings"],
     "additionalProperties": False,
 }
 
@@ -96,7 +102,7 @@ class OpenRouterExtractor:
                     temperature=0,  # OpenRouter молча отбрасывает параметр, если модель его не поддерживает
                     response_format={
                         "type": "json_schema",
-                        "json_schema": {"name": "meeting_time", "strict": True, "schema": OUTPUT_SCHEMA},
+                        "json_schema": {"name": "meetings", "strict": True, "schema": OUTPUT_SCHEMA},
                     },
                     extra_body=extra_body,
                 )

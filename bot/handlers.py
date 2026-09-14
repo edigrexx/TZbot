@@ -20,6 +20,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, User
 
 from .config import Config
+from .convert import split_message
 from .mentions import Entity, strip_bot_triggers
 from .parsing import UserFacingError
 from .service import NOT_FOUND_TEXT, ExtractFn, resolve
@@ -99,7 +100,8 @@ async def _answer(message: Message, candidates: list[Candidate], config: Config,
         for candidate in candidates:
             result = await resolve(candidate.text, candidate.ref, config.zones, extract)
             if result.found:
-                await message.reply(result.reply)
+                for chunk in split_message(result.reply):
+                    await message.reply(chunk)
                 return
     except UserFacingError as error:
         await message.reply(escape(error.message))
