@@ -1,4 +1,5 @@
 aiogram==3.31.0
-anthropic==1.5.0
+# OpenRouter совместим с OpenAI Chat Completions API — используем официальный SDK openai.
+openai==3.13.0
 # Свежая база IANA независимо от системной (Алматы перешёл на UTC+5 в 2024).
 tzdata==2026.4

@@ -10,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from .config import Config, ConfigError, load_config
-from .extractor import ClaudeExtractor
+from .extractor import OpenRouterExtractor
 from .handlers import router
 
 log = logging.getLogger("bot")
@@ -18,12 +18,18 @@ log = logging.getLogger("bot")
 
 async def run(config: Config) -> None:
     bot = Bot(config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    extractor = ClaudeExtractor(config.anthropic_api_key, config.model, config.zones)
+    extractor = OpenRouterExtractor(
+        api_key=config.openrouter_api_key,
+        model=config.model,
+        fallback_models=config.fallback_models,
+        reasoning_effort=config.reasoning_effort,
+        zones=config.zones,
+    )
     try:
         me = await bot.get_me()
         log.info(
-            "Запущен @%s, модель %s, зоны: %s, по умолчанию %s",
-            me.username, config.model,
+            "Запущен @%s, модель %s (запасные: %s), зоны: %s, по умолчанию %s",
+            me.username, config.model, ", ".join(config.fallback_models) or "нет",
             ", ".join(f"{z.label}={z.tz.key}" for z in config.zones), config.default_tz.key,
         )
         dispatcher = Dispatcher(config=config, extract=extractor, me=me)

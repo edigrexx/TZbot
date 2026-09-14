@@ -4,11 +4,14 @@ services:
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}
       TIMEZONES: ${TIMEZONES:-Almaty:Asia/Almaty,MSK:Europe/Moscow,Bishkek:Asia/Bishkek,Vietnam:Asia/Ho_Chi_Minh}
       DEFAULT_TZ: ${DEFAULT_TZ:-Asia/Almaty}
       USER_TIMEZONES: ${USER_TIMEZONES:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemini-3.1-flash-lite}
+      # Без двоеточия: пустое значение отключает запасные модели, незаданное — берёт значение по умолчанию.
+      OPENROUTER_FALLBACK_MODELS: ${OPENROUTER_FALLBACK_MODELS-google/gemini-2.5-flash-lite}
+      OPENROUTER_REASONING_EFFORT: ${OPENROUTER_REASONING_EFFORT:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     logging:
       driver: json-file

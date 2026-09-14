@@ -19,7 +19,7 @@ REF = datetime(2026, 9, 14, 10, 0, tzinfo=ALMATY)  # понедельник
 
 
 def fake_model(payload):
-    """Подменяет ClaudeExtractor: возвращает заранее заданный ответ и запоминает вызовы."""
+    """Подменяет OpenRouterExtractor: возвращает заранее заданный ответ и запоминает вызовы."""
     calls = []
 
     async def extract(text, ref):
@@ -160,6 +160,22 @@ class ModelOutputValidationTest(unittest.TestCase):
             {"found": True, "offset_minutes": int(timedelta(days=60).total_seconds() // 60), "tz": "Asia/Almaty"},
             "смещение",
         )
+
+    def test_strict_schema_nulls(self):
+        nulls = {"date": None, "time": None, "offset_minutes": None, "tz": None, "tz_explicit": None, "approximate": None}
+        self.assertFalse(parse_model_output(json.dumps(dict(nulls, found=False)), REF).found)
+
+        extraction = parse_model_output(
+            json.dumps(dict(nulls, found=True, date="2026-09-15", time="09:30", tz="Asia/Almaty")), REF
+        )
+        self.assertEqual(extraction.moment, datetime(2026, 9, 15, 9, 30, tzinfo=ALMATY))
+        self.assertFalse(extraction.approximate)
+        self.assertTrue(extraction.tz_explicit)
+
+        relative = parse_model_output(
+            json.dumps(dict(nulls, found=True, offset_minutes=30, tz="Asia/Almaty", tz_explicit=False)), REF
+        )
+        self.assertEqual(relative.moment, datetime(2026, 9, 14, 10, 30, tzinfo=ALMATY))
 
     def test_model_error_propagates_from_resolve(self):
         with self.assertRaises(UserFacingError):

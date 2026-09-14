@@ -8,7 +8,9 @@ from functools import lru_cache
 from typing import Mapping, Optional
 from zoneinfo import ZoneInfo, available_timezones
 
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_MODEL = "google/gemini-3.1-flash-lite"
+DEFAULT_FALLBACK_MODELS = ("google/gemini-2.5-flash-lite",)
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high")
 
 
 class ConfigError(Exception):
@@ -37,11 +39,13 @@ class Zone:
 @dataclass(frozen=True)
 class Config:
     bot_token: str
-    anthropic_api_key: str
+    openrouter_api_key: str
     zones: tuple[Zone, ...]
     default_tz: ZoneInfo
     user_timezones: Mapping[str, ZoneInfo] = field(default_factory=dict)
     model: str = DEFAULT_MODEL
+    fallback_models: tuple[str, ...] = DEFAULT_FALLBACK_MODELS
+    reasoning_effort: Optional[str] = None  # None — не передавать, оставить поведение модели
 
     def zone_for_user(self, user_id: Optional[int], username: Optional[str]) -> ZoneInfo:
         if user_id is not None and str(user_id) in self.user_timezones:
@@ -116,6 +120,19 @@ def parse_user_timezones(raw: str) -> dict[str, ZoneInfo]:
     return result
 
 
+def parse_fallback_models(raw: Optional[str], primary: str) -> tuple[str, ...]:
+    """None (переменная не задана) — модели по умолчанию; пустая строка — без запасных."""
+    if raw is None:
+        models = DEFAULT_FALLBACK_MODELS
+    else:
+        models = tuple(item.strip() for item in raw.split(",") if item.strip())
+    unique: list[str] = []
+    for model in models:
+        if model != primary and model not in unique:
+            unique.append(model)
+    return tuple(unique)
+
+
 def load_config(env: Optional[Mapping[str, str]] = None) -> Config:
     env = os.environ if env is None else env
 
@@ -126,14 +143,24 @@ def load_config(env: Optional[Mapping[str, str]] = None) -> Config:
         return value
 
     bot_token = required("BOT_TOKEN")
-    api_key = required("ANTHROPIC_API_KEY")
+    api_key = required("OPENROUTER_API_KEY")
     zones = parse_timezones(required("TIMEZONES"))
     default_tz = _zone_or_error(required("DEFAULT_TZ"), "DEFAULT_TZ", "DEFAULT_TZ")
+    model = env.get("OPENROUTER_MODEL", "").strip() or DEFAULT_MODEL
+
+    effort = env.get("OPENROUTER_REASONING_EFFORT", "").strip().lower() or None
+    if effort is not None and effort not in REASONING_EFFORTS:
+        raise ConfigError(
+            f"OPENROUTER_REASONING_EFFORT: «{effort}» — допустимо {', '.join(REASONING_EFFORTS)} или пусто"
+        )
+
     return Config(
         bot_token=bot_token,
-        anthropic_api_key=api_key,
+        openrouter_api_key=api_key,
         zones=zones,
         default_tz=default_tz,
         user_timezones=parse_user_timezones(env.get("USER_TIMEZONES", "")),
-        model=env.get("ANTHROPIC_MODEL", "").strip() or DEFAULT_MODEL,
+        model=model,
+        fallback_models=parse_fallback_models(env.get("OPENROUTER_FALLBACK_MODELS"), model),
+        reasoning_effort=effort,
     )
