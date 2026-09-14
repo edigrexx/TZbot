@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import sys
+from urllib.parse import urlsplit
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -26,6 +27,16 @@ async def run(config: Config) -> None:
         zones=config.zones,
     )
     try:
+        # Long polling не работает, пока у токена установлен webhook (например, от прошлого деплоя).
+        webhook = await bot.get_webhook_info()
+        if webhook.url:
+            log.warning(
+                "У бота установлен webhook на %s — удаляю, бот работает через long polling. "
+                "Накопленные для webhook обновления (%s) сбрасываются.",
+                urlsplit(webhook.url).netloc, webhook.pending_update_count,
+            )
+            await bot.delete_webhook(drop_pending_updates=True)
+
         me = await bot.get_me()
         log.info(
             "Запущен @%s, модель %s (запасные: %s), зоны: %s, по умолчанию %s",
