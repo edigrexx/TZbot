@@ -3,35 +3,59 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from bot.config import parse_timezones
-from bot.mentions import Entity, strip_bot_mentions
+from bot.mentions import Entity, strip_bot_triggers
 from bot.prompt import build_system_prompt
 
+BOT = "IQTimeDateSync_bot"
 BOT_ID = 777
 
 
-class MentionsTest(unittest.TestCase):
-    def test_mention_after_emoji_uses_utf16_offsets(self):
-        text = "👋 @TZ_Bot созвон в 15:00"  # эмодзи = 2 единицы UTF-16
-        mentioned, cleaned = strip_bot_mentions(text, [Entity("mention", 3, 7)], "tz_bot", BOT_ID)
-        self.assertTrue(mentioned)
-        self.assertEqual(cleaned, "👋 созвон в 15:00")
+def strip(text, *entities):
+    return strip_bot_triggers(text, entities, BOT, BOT_ID)
 
-    def test_other_user_mention_is_kept(self):
-        text = "@alice созвон в 15:00"
-        mentioned, cleaned = strip_bot_mentions(text, [Entity("mention", 0, 6)], "tz_bot", BOT_ID)
-        self.assertFalse(mentioned)
-        self.assertEqual(cleaned, text)
+
+def entity(text, fragment, type_="mention"):
+    """Сущность с UTF-16 смещением, как её присылает Telegram."""
+    offset = len(text[: text.index(fragment)].encode("utf-16-le")) // 2
+    return Entity(type_, offset, len(fragment.encode("utf-16-le")) // 2)
+
+
+class TriggersTest(unittest.TestCase):
+    def test_mention_at_end(self):
+        text = "Встреча в четверг в 17 00 по алматы @IQTimeDateSync_bot"
+        self.assertEqual(strip(text, entity(text, "@IQTimeDateSync_bot")), (True, "Встреча в четверг в 17 00 по алматы"))
+
+    def test_mention_is_case_insensitive_and_after_emoji(self):
+        text = "👋 @iqtimedatesync_BOT созвон в 15:00"
+        self.assertEqual(strip(text, entity(text, "@iqtimedatesync_BOT")), (True, "👋 созвон в 15:00"))
+
+    def test_only_mention(self):
+        text = "@IQTimeDateSync_bot"
+        self.assertEqual(strip(text, entity(text, text)), (True, ""))
+
+    def test_command_in_the_middle_or_end(self):
+        text = "Встреча в 12 00 завтра по бишкеку /time"
+        self.assertEqual(strip(text, entity(text, "/time", "bot_command")), (True, "Встреча в 12 00 завтра по бишкеку"))
+        text = "созвон /time@IQTimeDateSync_bot в 10 по мск"
+        self.assertEqual(strip(text, entity(text, "/time@IQTimeDateSync_bot", "bot_command")), (True, "созвон в 10 по мск"))
+
+    def test_foreign_command_or_mention_is_ignored(self):
+        text = "в 15:00 /time@other_bot @alice /start"
+        result = strip(
+            text,
+            entity(text, "/time@other_bot", "bot_command"),
+            entity(text, "@alice"),
+            entity(text, "/start", "bot_command"),
+        )
+        self.assertEqual(result, (False, text))
 
     def test_text_mention_by_id(self):
         text = "Бот, в пол десятого"
-        mentioned, cleaned = strip_bot_mentions(text, [Entity("text_mention", 0, 3, BOT_ID)], "tz_bot", BOT_ID)
-        self.assertTrue(mentioned)
-        self.assertEqual(cleaned, ", в пол десятого")
+        self.assertEqual(strip(text, Entity("text_mention", 0, 3, BOT_ID)), (True, ", в пол десятого"))
 
-    def test_only_mention(self):
-        mentioned, cleaned = strip_bot_mentions("@tz_bot", [Entity("mention", 0, 7)], "tz_bot", BOT_ID)
-        self.assertTrue(mentioned)
-        self.assertEqual(cleaned, "")
+    def test_plain_chat_message(self):
+        text = "Коллеги, всем привет"
+        self.assertEqual(strip(text), (False, text))
 
 
 class PromptTest(unittest.TestCase):

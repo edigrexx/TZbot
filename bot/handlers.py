@@ -1,8 +1,9 @@
 """Обработчики Telegram.
 
-С включённым privacy mode бот в группах получает только команды (`/time`, `/time@bot`) и реплаи
-на свои сообщения — поэтому основной способ вызова в группе — команда. Обработчик упоминаний
-остаётся для лички и для групп, где privacy mode выключен.
+Обратиться к боту можно @упоминанием или командой /time в любом месте сообщения — в том числе реплаем
+на сообщение со временем. В группах это требует выключенного privacy mode: иначе Telegram не доставляет
+боту ни упоминания, ни команды в середине текста. Сообщения без обращения к боту отбрасываются
+сразу — не логируются и не уходят в модель.
 """
 
 from __future__ import annotations
@@ -15,11 +16,11 @@ from typing import Optional
 
 from aiogram import F, Router
 from aiogram.enums import ChatType
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command
 from aiogram.types import Message, User
 
 from .config import Config
-from .mentions import Entity, strip_bot_mentions
+from .mentions import Entity, strip_bot_triggers
 from .parsing import UserFacingError
 from .service import NOT_FOUND_TEXT, ExtractFn, resolve
 
@@ -39,10 +40,10 @@ def help_text(me: User) -> str:
     bot = escape(me.username or "")
     return (
         "Пересчитываю время встречи во все часовые пояса команды.\n\n"
-        "<b>В группе</b>\n"
-        "• <code>/time встреча в четверг в 17:00 по алматы</code>\n"
-        "• ответьте на сообщение со временем командой <code>/time</code>\n"
-        f"Если в группе несколько ботов, пишите <code>/time@{bot}</code>.\n\n"
+        "<b>Как позвать</b>\n"
+        f"• отметьте меня в сообщении со временем: <i>Встреча в четверг в 17:00 по алматы @{bot}</i>\n"
+        f"• ответьте на сообщение со временем и отметьте меня: <i>@{bot}</i>\n"
+        "• вместо отметки можно написать <code>/time</code> в любом месте сообщения\n\n"
         "<b>В личке</b> — просто напишите сообщение со временем."
     )
 
@@ -69,7 +70,7 @@ def _reply_candidate(message: Message, config: Config, me: User) -> Optional[Can
     source = message.reply_to_message
     if source is not None and source.from_user and source.from_user.id == me.id:
         return None
-    # Цитата — часть самого сообщения с командой, поэтому доступна даже без reply_to_message.
+    # Цитата — часть самого сообщения, поэтому доступна даже без reply_to_message.
     if message.quote and message.quote.text.strip():
         return Candidate(message.quote.text, _ref(source or message, config))
     if source is None:
@@ -81,21 +82,18 @@ def _reply_candidate(message: Message, config: Config, me: User) -> Optional[Can
     return Candidate(text, _ref(source, config))
 
 
-def _log_command(message: Message, command: CommandObject) -> None:
+def _log_trigger(message: Message, own_text: str) -> None:
     # Только структура, без текстов: помогает понять, что Telegram передал боту.
     source = message.reply_to_message
     log.info(
-        "команда /%s chat=%s type=%s args=%s reply=%s reply_type=%s reply_text=%s quote=%s external_reply=%s",
-        command.command, message.chat.id, message.chat.type, bool(command.args),
+        "обращение chat=%s type=%s own_text=%s reply=%s reply_type=%s reply_text=%s quote=%s external_reply=%s",
+        message.chat.id, message.chat.type, bool(own_text.strip()),
         source is not None, source.content_type if source else None,
         bool(source and _text(source).strip()), message.quote is not None, message.external_reply is not None,
     )
 
 
-async def _answer(message: Message, candidates: list[Candidate], config: Config, extract: ExtractFn, me: User) -> None:
-    if not candidates:
-        await message.reply(help_text(me))
-        return
+async def _answer(message: Message, candidates: list[Candidate], config: Config, extract: ExtractFn) -> None:
     try:
         # Сначала собственный текст, затем сообщение, на которое ответили.
         for candidate in candidates:
@@ -118,37 +116,27 @@ async def on_help(message: Message, me: User) -> None:
     await message.reply(help_text(me))
 
 
-@router.message(Command("time", "tz"))
-async def on_command(message: Message, command: CommandObject, config: Config, extract: ExtractFn, me: User) -> None:
-    _log_command(message, command)
-    candidates = []
-    if command.args:
-        candidates.append(Candidate(command.args, _ref(message, config)))
-    reply = _reply_candidate(message, config, me)
-    if reply:
-        candidates.append(reply)
-
-    if not candidates and (message.reply_to_message is not None or message.external_reply is not None):
-        await message.reply(
-            "Не вижу текста сообщения, на которое вы ответили — Telegram его не передал.\n"
-            "Выделите фрагмент со временем и ответьте на него цитатой с <code>/time</code>, "
-            "или напишите время прямо в команде: <code>/time завтра в 11 по алматы</code>."
-        )
-        return
-    await _answer(message, candidates, config, extract, me)
-
-
 @router.message(F.text | F.caption)
 async def on_message(message: Message, config: Config, extract: ExtractFn, me: User) -> None:
-    mentioned, own_text = strip_bot_mentions(_text(message), _entities(message), me.username or "", me.id)
-    if not mentioned and message.chat.type != ChatType.PRIVATE:
-        # Сюда попадают, например, реплаи на сообщения бота без упоминания. Не читаем и не логируем.
+    triggered, own_text = strip_bot_triggers(_text(message), _entities(message), me.username or "", me.id)
+    if not triggered and message.chat.type != ChatType.PRIVATE:
+        # Обычная переписка чата: не читаем, не логируем, в модель не отправляем.
         return
 
+    _log_trigger(message, own_text)
     candidates = []
     if own_text.strip():
         candidates.append(Candidate(own_text, _ref(message, config)))
     reply = _reply_candidate(message, config, me)
     if reply:
         candidates.append(reply)
-    await _answer(message, candidates, config, extract, me)
+
+    if candidates:
+        await _answer(message, candidates, config, extract)
+    elif message.reply_to_message is not None or message.external_reply is not None:
+        await message.reply(
+            "Не вижу текста сообщения, на которое вы ответили — Telegram его не передал.\n"
+            "Проверьте, что у бота выключен privacy mode, или напишите время прямо в сообщении."
+        )
+    else:
+        await message.reply(help_text(me))
